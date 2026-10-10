@@ -1,0 +1,1 @@
+{ "name": "xcodebuild-status", "version": "0.1.0", "description": "Shows running xcodebuild status (build step or test progress) under the prompt", "types": "./types/index.d.ts" }
