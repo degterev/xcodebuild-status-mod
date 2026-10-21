@@ -1,0 +1,5 @@
+{
+  "name": "xcodebuild-status",
+  "owner": { "name": "Vadym Dehterov" },
+  "plugins": [{ "name": "xcodebuild-status", "source": "./" }]
+}

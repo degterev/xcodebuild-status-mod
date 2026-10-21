@@ -1,1 +1,10 @@
-{ "name": "xcodebuild-status", "version": "0.1.0", "description": "Shows running xcodebuild status (build step or test progress) under the prompt", "types": "./types/index.d.ts" }
+{
+  "name": "xcodebuild-status",
+  "version": "0.1.0",
+  "description": "Shows running xcodebuild status (build step or test progress) under the prompt",
+  "author": {
+    "name": "Vadym Dehterov"
+  },
+  "types": "./types/index.d.ts",
+  "license": "MIT"
+}
