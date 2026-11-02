@@ -12,7 +12,6 @@ import {
   phaseOf,
   plain,
   scan,
-  teeLogOf,
   totalKey,
 } from './parse'
 
@@ -55,11 +54,9 @@ test('build step and errors before tests start', async () => {
   expect(plain(format('test', t, 40, 0))).toBe('⚒ build for test · App · Ld · 1 error  1:02:05')
 })
 
-test('finds xcodebuild, its tee log and its compilers', async () => {
+test('finds xcodebuild and its compilers', async () => {
   const procs = parsePs(`  100   1 01:05 /bin/zsh -c xcodebuild() ( ... ) xcodebuild test -scheme App
   101   100 01:05 /Applications/Xcode 27.app/Contents/Developer/usr/bin/xcodebuild test -scheme App -resultBundlePath /tmp/r1
-  102   100 01:05 /bin/zsh -c xcodebuild
-  103   102 01:05 tee /var/folders/T//xcodebuild-status/1-2.log
   104   101 01:05 /Applications/Xcode.app/SWBBuildService
   105   104 01:05 /Applications/Xcode.app/usr/bin/swift-frontend -frontend -c
   106   104 01:05 /Applications/Xcode.app/usr/bin/swift-frontend -frontend -c
@@ -67,7 +64,6 @@ test('finds xcodebuild, its tee log and its compilers', async () => {
   const [xcodebuild, ...others] = procs.filter(isXcodebuild)
   expect(xcodebuild?.pid).toBe(101)
   expect(others).toEqual([])
-  expect(teeLogOf(xcodebuild!, procs)).toBe('/var/folders/T//xcodebuild-status/1-2.log')
   expect(phaseOf(101, procs)).toBe('compiling ×2')
   expect(actionOf(xcodebuild!.args)).toBe('test')
   expect(totalKey(xcodebuild!.args)).toBe('test -scheme App')
@@ -92,12 +88,6 @@ test('review regressions', async () => {
   301   300 00:05 /Volumes/External SSD/Xcode 27 - beta.app/Contents/Developer/usr/bin/xcodebuild test
   302   1 00:05 /Applications/Xcode Versions/Xcode-16.2.app/Contents/Developer/usr/bin/xcodebuild build`)
   expect(spaced.filter(isXcodebuild).map(p => p.pid)).toEqual([301, 302])
-  // 302 was adopted by launchd unwrapped; 401 is a wrapped run whose shell exited, its tee adopted too.
-  const adopted = parsePs(`  302   1 00:05 /usr/bin/xcodebuild test
-  400   1 00:05 /bin/zsh -c xcodebuild
-  401   400 00:05 /usr/bin/xcodebuild test
-  402   1 00:05 tee /T/xcodebuild-status/7-402.log`)
-  expect(teeLogOf(adopted[0]!, adopted)).toBe(undefined)
   expect(phaseOf(201, procs)).toBe('linking')
 })
 

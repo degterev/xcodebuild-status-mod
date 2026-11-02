@@ -11,20 +11,17 @@ import {
   parsePs,
   phaseOf,
   scan,
-  teeLogOf,
   totalKey,
-  wrap,
 } from './parse'
 import type { Proc, Tally } from './parse'
 
 const line = atom({ plugin: 'xcodebuild-status', key: 'line' } as const, null as Line)
 
 const POLL_MS = 2000
-const RUNS_XCODEBUILD = /(?:^|[\s;&|(])xcodebuild\s/
 
 type Run = { args: string; path?: string; isLsofChecked: boolean; offset: number; tally: Tally }
 
-// ponytail: module state, a hot reload re-reads running tee logs from the start on its next tick.
+// ponytail: module state, a hot reload re-reads running logs from their end on its next tick.
 const runs = new Map<number, Run>()
 let totals: Record<string, number> = {}
 let shown: Line = null
@@ -33,7 +30,7 @@ let isBusy = false
 let lastResult: Line = null
 // Bumped by each prompt, so a tick that started before it does not draw over its clearing.
 let prompts = 0
-// The Claude process: xcodebuilds below it, or teeing into a log named after it, belong to this session.
+// The Claude process: xcodebuilds below it belong to this session.
 let hostPid = 0
 // ponytail: polls only while a Bash call runs or a build it started is alive;
 // an xcodebuild a background script starts after its call returned is missed.
@@ -79,7 +76,6 @@ async function finish($: EngineInterface, run: Run, prompt: number) {
     totals = { ...totals, [totalKey(run.args)]: run.tally.done }
     await $.store.set('totals', totals)
   }
-  if (run.path?.includes('/xcodebuild-status/')) await $.process.run(['rm', '-f', run.path])
   // A prompt that came in meanwhile has already cleared the last result; this one is older still.
   if (prompt === prompts) lastResult = formatResult(actionOf(run.args), run.tally) ?? lastResult
 }
@@ -89,8 +85,7 @@ async function tick($: EngineInterface) {
   const owner = await host($)
   const procs: Proc[] = parsePs((await $.process.run(['ps', '-axww', '-o', 'pid=,ppid=,etime=,args='])).stdout)
   // A tracked run stays ours once its shell exited and launchd adopted it.
-  const isOurs = (p: Proc) =>
-    !owner || runs.has(p.pid) || isBelow(p.pid, owner, procs) || !!teeLogOf(p, procs)?.includes(`/xcodebuild-status/${owner}-`)
+  const isOurs = (p: Proc) => !owner || runs.has(p.pid) || isBelow(p.pid, owner, procs)
   const builds = procs.filter(p => isXcodebuild(p) && isOurs(p))
 
   for (const [pid, run] of runs) {
@@ -103,7 +98,6 @@ async function tick($: EngineInterface) {
   for (const b of builds) {
     const run = runs.get(b.pid) ?? { args: b.args, isLsofChecked: false, offset: 0, tally: emptyTally() }
     runs.set(b.pid, run)
-    run.path ??= teeLogOf(b, procs)
     if (!run.path && !run.isLsofChecked) {
       run.isLsofChecked = true
       await stdoutFile($, run, b.pid)
@@ -166,22 +160,10 @@ export const register: Register = on => {
     bashCalls += 1
     poller ??= $.clock.every(POLL_MS, () => void poll($))
     try {
-      const prefix = `${wrap(String(await host($)))}\n`
-      return await next(RUNS_XCODEBUILD.test(e.command) ? { ...e, command: prefix + e.command } : e)
+      return await next(e)
     } finally {
       bashCalls -= 1
     }
-  })
-
-  // Settings rules judge the command as the model wrote it, not with the wrapper in front: the engine's
-  // verdict is replaced by a query on the bare command. A query runs no PreToolUse hook and knows no
-  // subagent, so a hook's verdict and a subagent's are kept as they are, judged with the wrapper.
-  on('tool.check', { tool: 'Bash' }, async ($, e, next) => {
-    const verdict = await next(e)
-    const { command } = e.input as { command?: unknown }
-    const prefix = `${wrap(String(await host($)))}\n`
-    if (typeof command !== 'string' || !command.startsWith(prefix) || verdict.hook || e.agentId) return verdict
-    return $.tool.check({ tool: 'Bash', input: { ...(e.input as object), command: command.slice(prefix.length) } })
   })
 
   // The engine's own hint line stays live; the status is drawn after it.

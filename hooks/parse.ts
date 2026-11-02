@@ -3,21 +3,9 @@ import type { Segment } from '../types'
 export type Proc = { pid: number; ppid: number; seconds: number; args: string }
 export type Tally = { done: number; failed: number; skipped: number; errors: number; isTesting: boolean; step: string; banner: string; seconds: number }
 
-// Prepended to Bash commands that run xcodebuild: tees its stdout into a log the poller can read,
-// so `xcodebuild ... | tail` still reports progress. pipefail keeps xcodebuild's exit code; the tee side
-// always succeeds, so a log that cannot be written never fails the build. The log name starts with
-// `owner` (the Claude pid), which claims a build for its session after its shell is gone (`&`), and ends
-// with tee's own pid: unique per run, where zsh's $RANDOM repeats in every function subshell.
-// Kept to plain commands, since permission rules and hooks judge it along with the model's command.
-// ponytail: the poller deletes each log when its run ends; one orphaned by a killed session stays in TMPDIR.
-export const wrap = (owner: string) =>
-  `xcodebuild() ( set -o pipefail; d="\${TMPDIR:-/tmp}/xcodebuild-status"; mkdir -p "$d"; ` +
-  `command xcodebuild "$@" | { sh -c 'exec tee "$0-$$.log"' "$d/${owner}" 2>/dev/null; true; } )`
-
 // An Xcode path may hold spaces in any folder (`/Volumes/External SSD/Xcode 27 - beta.app`) but not
 // a `-c` word, so the shell running it stays out.
 const XCODEBUILD = /^(?:\S*\/|(?:\/[^\s/]+(?: (?!-\w)[^\s/]+)*)*\.app\/Contents\/Developer\/usr\/bin\/)?xcodebuild(?:\s|$)/
-const TEE_LOG = /^(?:\S*\/)?tee .*?(\S*xcodebuild-status\/\S+\.log)/
 const ACTIONS = ['test-without-building', 'build-for-testing', 'test', 'build', 'archive', 'analyze', 'clean']
 // XCTest (`Test Case '-[A b]' passed (…)`, `Test case 'A.b()' passed on '…'`) and
 // Swift Testing (`<sym> Test b() passed after 1.0 seconds.`); not `Test run with …` or the lines a test
@@ -47,22 +35,6 @@ export const parsePs = (text: string): Proc[] =>
   })
 
 export const isXcodebuild = (p: Proc) => XCODEBUILD.test(p.args)
-
-// The log wrap's tee writes for this xcodebuild: tee runs under the same function subshell
-// (a child of it in zsh, a grandchild through the `{ }` group in bash).
-// An xcodebuild launchd adopted itself (`nohup xcodebuild … &`) was never wrapped: it has no such tee.
-export function teeLogOf(x: Proc, procs: Proc[]): string | undefined {
-  if (x.ppid === 1) return undefined
-  const byPid = new Map(procs.map(p => [p.pid, p]))
-  for (const tee of procs) {
-    const path = TEE_LOG.exec(tee.args)?.[1]
-    let p: Proc | undefined = tee
-    for (let hops = 0; path && p && hops < 3; p = byPid.get(p.ppid), hops++) {
-      if (p.ppid === x.ppid) return path
-    }
-  }
-  return undefined
-}
 
 // ponytail: any bare action word counts, so `-scheme test` reads as a test run.
 // A test action wins (`clean test`), else the last one (`clean build`).
@@ -97,7 +69,7 @@ export function scan(t: Tally, text: string): Tally {
   return t
 }
 
-// Without a log (stdout is a terminal or an unwrapped pipe): what the build service is running now.
+// Without a log (stdout is a terminal or a pipe): what the build service is running now.
 export function phaseOf(pid: number, procs: Proc[]): string {
   const below = new Set([pid])
   for (let grew = true; grew; ) {

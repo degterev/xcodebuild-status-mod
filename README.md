@@ -41,23 +41,17 @@ Answer `y` to add the marketplace, then pick a scope. Nothing else to configure.
 
 ## How it works
 
-- Every Bash call Claude makes that runs `xcodebuild` gets a one-line shell function prepended, which
-  tees xcodebuild's stdout into `$TMPDIR/xcodebuild-status/<pid>-<pid>.log`. The build's exit code and
-  its output to Claude are unchanged; `xcodebuild … | tail -20` still reports progress. The log is deleted
-  when the run ends.
 - While a Bash call is running, or a build it started is alive, the mod polls `ps` every two seconds,
-  finds the `xcodebuild` processes that belong to this session, and reads their logs. It stops polling
+  finds the `xcodebuild` processes that belong to this session, and reads what they write. It stops polling
   when there is nothing to watch.
-- An `xcodebuild` started without the wrapper (from a script or `make test`) is still found by process
-  tree. If its stdout is redirected to a file, that file is read; otherwise only the compiler phase is shown.
-- Permission rules and `/permissions` prompts judge the command exactly as Claude wrote it, without the
-  wrapper in front.
+- A build whose stdout goes to a file (the Bash tool's own output file, `> log`) is read from that file.
+  One writing to a pipe (`xcodebuild … | tail -20`) or a terminal shows only the compiler phase.
+- Claude's commands are never changed, so permission rules and auto mode judge exactly what Claude wrote.
 
 ## Permissions
 
-- **Runs commands** through `$.process`: `ps`, `lsof`, `wc`, `tail`, `rm`, and `sh -c 'echo $PPID'`,
+- **Runs commands** through `$.process`: `ps`, `lsof`, `wc`, `tail`, and `sh -c 'echo $PPID'`,
   only while a build may be running.
-- **Prepends** a shell function to Bash commands that run `xcodebuild` (plain `sh` builtins plus `tee`).
 - **Stores** one number per test command, the last complete run's test count, in the plugin store.
 - **No network.**
 
@@ -65,7 +59,7 @@ Answer `y` to add the marketplace, then pick a scope. Nothing else to configure.
 
 - An `xcodebuild` a background script starts *after* its Bash call returned is missed.
 - Output a redirected build wrote before the first poll saw it is skipped.
-- Logs orphaned by a killed Claude session stay in `$TMPDIR/xcodebuild-status/`.
+- A piped build (`xcodebuild … | tail`) has no step, test count or banner, only the compiler phase and the time.
 - Only the first of several concurrent builds is detailed.
 
 ## Development
